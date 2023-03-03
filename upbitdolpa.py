@@ -1,4 +1,4 @@
-#-*-coding:utf-8 -*-
+#-*-coding:utf-8 -*
 import myUpbit   #우리가 만든 함수들이 들어있는 모듈
 import time
 import datetime
@@ -14,6 +14,16 @@ import json
 
 크론탭에 1분마다 동작하게 등록합니다. 
 
+*투자 로직*
+1.0 - 변동성 돌파 + 변동성 조절 + 노이즈 K + 이평선 상승장
+      트레일링 스탑 1% 적용
+1.1 - 변동성 돌파 + 노이즈 K + 180일봉 볼린저 밴드 상승돌파
+      익절선을 넘을 경우 추가 매수(불타기)
+      하루가 지나도 수익율이 0% 초과인 경우 유지
+1.2 - 변동성 돌파 + 노이즈 K + 상승장 and 180일봉 볼린저 밴드 상승돌파 + 슈퍼트렌드 매수타이밍
+      슈퍼트렌드 매도타이밍 캐치하면 바로 매도
+      비트코인이 상승장일때만 거래시도
+      
 '''
 
 #암복호화 클래스 객체를 미리 생성한 키를 받아 생성한다.
@@ -96,7 +106,7 @@ except Exception as e:
 #수익율 0.5%를 트레일링 스탑 기준으로 잡는다. 즉 고점 대비 0.5% 하락하면 매도 처리 한다!
 #이 수치는 코인에 따라 한 틱만 움직여도 손절 처리 될 수 있으니 
 #1.0 이나 1.5 등 다양하게 변경해서 테스트 해보세요!
-stop_revenue = 1
+stop_revenue = 5.0
 ##############################################################
 
 
@@ -115,6 +125,24 @@ print("GMT 기준 :", hour,"시", min,"분")
 time_now = datetime.datetime.now()
 timestamp = time_now.timestamp()
 
+# 상승장에만 투자할 수 있도록 비트코인을 기준으로 마켓타이밍을 잡는다
+BTC_now = pyupbit.get_current_price("KRW-BTC")
+df_btc = pyupbit.get_ohlcv("KRW-BTC",interval="day")
+
+btc_ma3 = float(myUpbit.GetMA(df_btc,3,-1))
+btc_ma5 = float(myUpbit.GetMA(df_btc,5,-1))
+btc_ma10 = float(myUpbit.GetMA(df_btc,10,-1))
+btc_ma20 = float(myUpbit.GetMA(df_btc,20,-1))
+
+BTC_all_up = BTC_now > btc_ma3 and BTC_now > btc_ma5 and BTC_now > btc_ma10 and BTC_now > btc_ma20
+
+print('==================================================')
+print('현재 비트코인이 3일 이평선을 넘었나요? :',BTC_now > btc_ma3)
+print('현재 비트코인이 5일 이평선을 넘었나요? :',BTC_now > btc_ma5)
+print('현재 비트코인이 10일 이평선을 넘었나요? :',BTC_now > btc_ma10)
+print('현재 비트코인이 20일 이평선을 넘었나요? :',BTC_now > btc_ma20)
+print('==================================================')
+print('현재 비트코인이 상승장인가요? :', BTC_all_up)
 
 #베스트봇 과정 진행하면서 탑코인 리스트 만들때 아래 같은 경로에 저장하게 만들었기에
 #일단 그대로 사용합니다. https://blog.naver.com/zacra/222670663136
@@ -124,21 +152,21 @@ top_file_path = "./UpbitTopCoinList.json"
 TopCoinList = list()
 
 #파일을 읽어서 리스트를 만듭니다.
-try:
-    with open(top_file_path, "r") as json_file:
-        TopCoinList = json.load(json_file)
 
-except Exception as e:
-    TopCoinList = myUpbit.GetTopCoinList("day",30)
-    print("Exception by First")
+if BTC_all_up == True:
+    try:
+        with open(top_file_path, "r") as json_file:
+            TopCoinList = json.load(json_file)
+
+    except Exception as e:
+        TopCoinList = myUpbit.GetTopCoinList("day",30)
+        print("Exception by First")
 
 # 로그를 남기기 위한 사전 작업을 합시다.
 
 today = datetime.date.today().strftime("%Y-%m-%d")
 
 try:        
-    DolPaDailyLogDict[today] = {'매수한 코인 개수':0,'매수한 티커': "", '최종 수익율':0}
-
     with open(dailylog_type_file_path, 'w') as json_file:
         json.dump(DolPaDailyLogDict, json_file, ensure_ascii=False, indent=4)
 
@@ -148,111 +176,140 @@ except Exception as e:
 
 #거래대금 탑 코인 리스트를 1위부터 내려가며 매수 대상을 찾는다.
 #전체 원화 마켓의 코인이 아니라 탑 순위 TopCoinList 안에 있는 코인만 체크해서 매수한다는 걸 알아두세요!
-for ticker in TopCoinList:
-    try: 
-        print("Coin Ticker: ",ticker)
 
-        #변동성 돌파리스트에 없다. 즉 아직 변동성 돌파 전략에 의해 매수되지 않았다.
-        if myUpbit.CheckCoinInList(DolPaCoinList,ticker) == False:
-            
-            time.sleep(0.05)
-            df = pyupbit.get_ohlcv(ticker,interval="day") #일봉 데이타를 가져온다.
-            
-            #코인당 매수할 매수금액을 재지정 한다.
-            #여기서 마켓타이밍을 기준으로 투자금을 조절한다.
-            ma3 = float(myUpbit.GetMA(df,3,-2))
-            ma5 = float(myUpbit.GetMA(df,5,-2))
-            ma10 = float(myUpbit.GetMA(df,10,-2))
-            ma20 = float(myUpbit.GetMA(df,20,-2))
+# 비트코인이 상승장일때에만 거래를 한다.
+if BTC_all_up == True:
 
-            j = 0
+    print('야호! 상승장이다! 매수 가즈아!')
 
-            for i in [ma3,ma5,ma10,ma20]:
-                if i == True:
-                    j = j + 1
-            ma_score = (j / 4)
+    for ticker in TopCoinList:
+        try: 
+            print("Coin Ticker: ",ticker)
 
-            CoinMoney = (TotalWon / MaxCoinCnt) * ma_score
-
-            #그리고 자금관리를 통해 한 번더 안전하게 투자금을 조절한다.
-            money_ctrl = (((float(df['high'][-2]) - float(df['low'][-2]))) / float(df['close'][-2])) * 100
-            
-            #최종 투자금액은 다음과 같다.
-            f_cm = CoinMoney * round((3 / money_ctrl),0)
-            #여기서 K/자금관리 값의 K는 투자를 공격적으로 할건지를 결정한다
-            #1은 소극적, 2는 보통, 3은 공격적 투자이다
-
-            # 다만 투자금이 5천원 미만일 경우 투자 및 손절이 불가하므로 강제로 10000원으로 만들어 준다!
-            if f_cm < 10000:
-                f_cm = 10000
-
-            print('최종 투자금 :',f_cm)
-
-            #유동적인 K값을 구하기 위해 평균 노이즈 비율을 이용하자
-            noise = 1 - ((abs(df.close - df.open))/(df.high - df.low))
-            #20일 평균 노이즈 비율을 구해서 K값으로 이용한다.
-            noise_20 = noise.tail(20).mean()
-            print('현재 노이즈 값은? :',round(noise_20,2))
-
-            #어제의 고가와 저가의 변동폭에 0.5를 곱해서
-            #오늘의 시가와 더해주면 목표 가격이 나온다!
-            target_price = float(df['open'][-1]) + (float(df['high'][-2]) - float(df['low'][-2])) * round(noise_20,2)
-            
-            #과도한 변동성에 투자를 막기 위한 변동성 조절도 필요하다.
-            change_per = (df.high.shift(1) - df.low.shift(1)) / (df.open) * 100
-            change_f = change_per.tail(5).mean()
-        
-            #현재가
-            now_price = float(df['close'][-1])
-
-            #5일 이동평균선
-            # df_15 = pyupbit.get_ohlcv(ticker,interval="minute15") #15분봉 데이타를 가져온다.
-            ma5 = float(myUpbit.GetMA(df,5,-2))
-
-            print('현재가 :',now_price , "타겟가 :", target_price,'변동성 :', round(change_f,1), '5일이평선 :', ma5)
-            print('현재가가 타겟가보다 높은가? :',now_price > target_price)
-            print('변동성이 5 미만인가? :',change_f <= 5)
-            print('5일 이평선 보다 현재가가 높은가? :',now_price > ma5)
-            
-            
-            #이를 돌파했다면 변동성 돌파 성공!! 코인을 매수하고 지정가 익절을 걸고 파일에 해당 코인을 저장한다!
-            #그 전에 상승장인지(각 화폐의 가격이 5일 이동평균보다 높은지) 여부 파악하여 낮으면 거래하지 않고 높으면 거래한다.
-            
-            if change_f < 5 and now_price > ma5 and now_price > target_price and len(DolPaCoinList) < MaxCoinCnt: # and change_f <= 5 and myUpbit.GetHasCoinCnt(balances) < MaxCoinCnt: 
-
-                #보유하고 있지 않은 코인 (매수되지 않은 코인)일 경우만 매수한다!
-                if myUpbit.IsHasCoin(balances, ticker) == False:
-
-                    print("!!!!!!!!!!!!!!!DolPa GoGoGo!!!!!!!!!!!!!!!!!!!!!!!!")
-                    #시장가 매수를 한다.
-                    balances = myUpbit.BuyCoinMarket(upbit,ticker,f_cm)
-            
-                    #매수된 코인을 DolPaCoinList 리스트에 넣고 이를 파일로 저장해둔다!
-                    DolPaCoinList.append(ticker)
+            #변동성 돌파리스트에 없다. 즉 아직 변동성 돌파 전략에 의해 매수되지 않았다.
+            if myUpbit.CheckCoinInList(DolPaCoinList,ticker) == False:
                 
-                    #파일에 리스트를 저장합니다
-                    with open(dolpha_type_file_path, 'w') as outfile:
-                        json.dump(DolPaCoinList, outfile)
+                time.sleep(0.05)
+                df = pyupbit.get_ohlcv(ticker,interval="day") #일봉 데이타를 가져온다.
+                
+                #코인당 매수할 매수금액을 재지정 한다.
+                #여기서 마켓타이밍을 기준으로 투자금을 조절한다.
+                ma3 = float(myUpbit.GetMA(df,3,-2))
+                ma5 = float(myUpbit.GetMA(df,5,-2))
+                ma10 = float(myUpbit.GetMA(df,10,-2))
+                ma20 = float(myUpbit.GetMA(df,20,-2))
 
-                    ##############################################################
-                    #매수와 동시에 초기 수익율과 구매당시 시간을 넣는다. (당연히 수익율은 0일테니 0을 넣고)
-                    DolPaRevenueDict[ticker] = [0,timestamp]
+                j = 0
+
+                for i in [ma3,ma5,ma10,ma20]:
+                    if i == True:
+                        j = j + 1
+                ma_score = (j / 4)
+
+                CoinMoney = (TotalWon / MaxCoinCnt) * ma_score
+
+                #그리고 자금관리를 통해 한 번더 안전하게 투자금을 조절한다.
+                money_ctrl = (((float(df['high'][-2]) - float(df['low'][-2]))) / float(df['close'][-2])) * 100
+                
+                #최종 투자금액은 다음과 같다.
+                f_cm = CoinMoney * round((3 / money_ctrl),0)
+                #여기서 K/자금관리 값의 K는 투자를 공격적으로 할건지를 결정한다
+                #1은 소극적, 2는 보통, 3은 공격적 투자이다
+
+                # 다만 투자금이 5천원 미만일 경우 투자 및 손절이 불가하므로 강제로 6000원으로 만들어 준다!
+                if f_cm < 6000:
+                    f_cm = 6000
+
+                print('최종 투자금 :',f_cm)
+
+                #유동적인 K값을 구하기 위해 평균 노이즈 비율을 이용하자
+                noise = 1 - ((abs(df.close - df.open))/(df.high - df.low))
+                #20일 평균 노이즈 비율을 구해서 K값으로 이용한다.
+                noise_20 = noise.tail(20).mean()
+                print('현재 노이즈 값은? :',round(noise_20,2))
+
+                #어제의 고가와 저가의 변동폭에 0.5를 곱해서
+                #오늘의 시가와 더해주면 목표 가격이 나온다!
+                target_price = float(df['open'][-1]) + (float(df['high'][-2]) - float(df['low'][-2])) * round(noise_20,2)
+                
+                ######################################################################
+
+                
+
+                ######################################################################
+
+                #과도한 변동성에 투자를 막기 위한 변동성 조절도 필요하다.
+                change_per = (df.high.shift(1) - df.low.shift(1)) / (df.open) * 100
+                change_f = change_per.tail(5).mean()
+            
+                #현재가
+                now_price = float(df['close'][-1])
+
+                #5일 이동평균선
+                # df_15 = pyupbit.get_ohlcv(ticker,interval="minute15") #15분봉 데이타를 가져온다.
+                ma5 = float(myUpbit.GetMA(df,5,-2))
+
+                # 볼린저 밴드(180일봉) 돌파를 이용해 큰추세로 상승세인지 알아본다
+                BBdolpa = myUpbit.BBUSignal(df,180,-1)
+
+                # 슈퍼트렌드를 통해 매수신호가 잡혔는지도 알아본다
+                Supertrend = myUpbit.GetSupertrend(df,30,5)
+
+                print('==================================================')    
+                print('현재가 :',now_price , "타겟가 :", target_price,'변동성 :', round(change_f,1), '5일이평선 :', ma5)
+                print('==================================================')
+                print('현재가가 타겟가보다 높은가? :',now_price > target_price)
+                # print('변동성이 10 미만인가? :',change_f <= 10)
+                print('5일 이평선 보다 현재가가 높은가? :',now_price > ma5)
+                print('==================================================')
+                print('볼린저 180일봉 상단선을 상향돌파했는가? :',BBdolpa == True)
+                print('수퍼트렌드 차트 상 매수신호가 잡혔는가? :',Supertrend == True)
+
+                #이를 돌파했다면 변동성 돌파 성공!! 코인을 매수하고 지정가 익절을 걸고 파일에 해당 코인을 저장한다!
+                #그 전에 상승장인지(각 화폐의 가격이 5일 이동평균보다 높은지) 여부 파악하여 낮으면 거래하지 않고 높으면 거래한다.
+                
+                if now_price > target_price and now_price > ma5 and len(DolPaCoinList) < MaxCoinCnt or len(DolPaCoinList) < MaxCoinCnt and BBdolpa == True and Supertrend == True:
+                    # and now_price > ma5 and change_f <= 10 change_f < 5 and change_f <= 5 and myUpbit.GetHasCoinCnt(balances) < MaxCoinCnt: 
+
+                    #보유하고 있지 않은 코인 (매수되지 않은 코인)일 경우만 매수한다!
+                    if myUpbit.IsHasCoin(balances, ticker) == False:
+
+                        print("!!!!!!!!!!!!!!!DolPa GoGoGo!!!!!!!!!!!!!!!!!!!!!!!!")
+                        #시장가 매수를 한다.
+                        balances = myUpbit.BuyCoinMarket(upbit,ticker,f_cm)
+                
+                        #매수된 코인을 DolPaCoinList 리스트에 넣고 이를 파일로 저장해둔다!
+                        DolPaCoinList.append(ticker)
                     
-                    #파일에 딕셔너리를 저장합니다
-                    with open(revenue_type_file_path, 'w') as outfile:
-                        json.dump(DolPaRevenueDict, outfile)
-                    ##############################################################
-                    # 매수된 코인 개수와 티커를 기록합시다.
-                    buy_count = myUpbit.GetHasCoinCnt(balances)
+                        #파일에 리스트를 저장합니다
+                        with open(dolpha_type_file_path, 'w') as outfile:
+                            json.dump(DolPaCoinList, outfile)
 
-                    DolPaDailyLogDict[today].update({'매수한 코인 개수': buy_count, '매수한 티커': ticker})
+                        ##############################################################
+                        #매수와 동시에 초기 수익율과 구매당시 시간을 넣는다. (당연히 수익율은 0일테니 0을 넣고)
+                        DolPaRevenueDict[ticker] = [0,timestamp]
+                        
+                        #파일에 딕셔너리를 저장합니다
+                        with open(revenue_type_file_path, 'w') as outfile:
+                            json.dump(DolPaRevenueDict, outfile)
+                        ##############################################################
+                        # 매수된 코인 개수와 티커를 기록합시다.
+                        buy_count = myUpbit.GetHasCoinCnt(balances)
 
-                    with open(dailylog_type_file_path, 'w') as json_file:
-                        json.dump(DolPaDailyLogDict, json_file)
-                    ##############################################################
+                        DolPaDailyLogDict[today] = ({'매수한 코인 개수': buy_count, '매수한 티커': ticker})
 
-    except Exception as e:
-        print("---:", e)
+                        with open(dailylog_type_file_path, 'w') as json_file:
+                            json.dump(DolPaDailyLogDict, json_file)
+                        ##############################################################
+
+        except Exception as e:
+            print("---:", e)
+
+else:
+                print('######################')
+                print('오늘은 날이 좋지 않군...')
+                print('######################')
+                print('')
 
 
 
@@ -275,42 +332,66 @@ for ticker in Tickers:
         if myUpbit.CheckCoinInList(DolPaCoinList,ticker) == True:
 
 
-            #구매 당시 시간 기준 24시간이 지났다면 (아직 익절이나 손절이 안된 경우) 매도하고 리스트에서 빼준다!
+            #구매 당시 시간 기준 24시간이 지났다면 (아직 익절이나 손절이 안된 경우)
             if (timestamp - DolPaRevenueDict[ticker][1]) > 86400 :
+                
+                # 수익율을 먼저 계산합니다.
+                revenue_rate = myUpbit.GetRevenueRate(balances,ticker)
 
-                #리스트에서 코인을 빼 버리고
-                DolPaCoinList.remove(ticker)
+                 #보유중인 코인이고 익절선 이상 수익이 나고 있다면 유지!
+                if myUpbit.IsHasCoin(balances, ticker) == True and revenue_rate > stop_revenue:
+                    pass
 
-                 #보유중인 코인이라면.
-                if myUpbit.IsHasCoin(balances, ticker) == True:
+                else: #그게 아니라면
+
+                    #리스트에서 코인을 빼 버리고
+                    DolPaCoinList.remove(ticker)
+
                     #시장가로 모두 매도!
                     balances = myUpbit.SellCoinMarket(upbit,ticker,upbit.get_balance(ticker))
 
                     # 매도 당시 수익율을 구해 로그에 저장합니다.
                     revenue_rate = myUpbit.GetRevenueRate(balances,ticker)
-                    DolPaDailyLogDict[today]['최종 수익율'] = DolPaDailyLogDict[today].get('최종 수익율', 0) + revenue_rate
+
+                    DolPaDailyLogDict[today][ticker]['수익율'] = revenue_rate
 
                     with open(dailylog_type_file_path, 'w') as outfile:
                         json.dump(DolPaDailyLogDict, outfile)
 
-                #파일에 리스트를 저장합니다
-                with open(dolpha_type_file_path, 'w') as outfile:
-                    json.dump(DolPaCoinList, outfile)
+                    #파일에 리스트를 저장합니다
+                    with open(dolpha_type_file_path, 'w') as outfile:
+                        json.dump(DolPaCoinList, outfile)
             
 
 
             #영상에 빠져 있지만 이렇게 매수된 상태의 코인인지 체크하고 난뒤 진행합니다~!
             if myUpbit.IsHasCoin(balances, ticker) == True:
 
-                #수익율을 구한다.
+                #수익율과 슈퍼트렌드를 구한다.
+                #여기서 슈퍼트렌드는 민감도를 올리기 위해 1분봉으로 한다.
+                df_1m = pyupbit.get_ohlcv(ticker,interval="minute1")
                 revenue_rate = myUpbit.GetRevenueRate(balances,ticker)
+                Supertrend = myUpbit.GetSupertrend(df_1m,30,5)
 
                 ##############################################################
-                #방금 구한 수익율이 파일에 저장된 수익율보다 높다면 갱신시켜준다!
+                #방금 구한 수익율이 파일에 저장된 수익율보다 높다면
                 if revenue_rate > DolPaRevenueDict[ticker][0] :
 
-                    #이렇게 딕셔너리에 값을 넣어주면 된다.
+                    #먼저 딕셔너리에 값을 넣어주고
                     DolPaRevenueDict[ticker][0] = revenue_rate
+                    
+                    # 수익률이 매번 정해진 숫자의 배수를 넘길때마다 추가매수!
+                    
+                    if DolPaRevenueDict[ticker][0] > stop_revenue:
+                        
+                        i += 1
+                        stop_revenue = stop_revenue * i
+
+                        if DolPaRevenueDict[ticker][0] > stop_revenue == False:
+                            balances = myUpbit.BuyCoinMarket(upbit, ticker, f_cm)    
+                        
+                    else:
+                        i = 1
                     
                     #파일에 딕셔너리를 저장합니다
                     with open(revenue_type_file_path, 'w') as outfile:
@@ -327,17 +408,41 @@ for ticker in Tickers:
                         balances = myUpbit.SellCoinMarket(upbit,ticker,upbit.get_balance(ticker))
                         
                         # 수익율을 기록하고 저장합니다
-                        DolPaDailyLogDict[today]['최종 수익율'] = DolPaDailyLogDict[today].get('최종 수익율', 0) + revenue_rate
+                        DolPaDailyLogDict[today][ticker]['수익율'] = revenue_rate
 
                         with open(dailylog_type_file_path, 'w') as outfile:
                             json.dump(DolPaDailyLogDict, outfile)
+                    
+                    # 슈퍼트렌드에서 매도신호가 떴다면 모두 매도!
+                    elif Supertrend == False :
+                        
+                        #시장가로 모두 매도!
+                        balances = myUpbit.SellCoinMarket(upbit,ticker,upbit.get_balance(ticker))
+                        
+                        # 수익율을 기록하고 저장합니다
+                        DolPaDailyLogDict[today][ticker]['수익율'] = revenue_rate
+
+                        with open(dailylog_type_file_path, 'w') as outfile:
+                            json.dump(DolPaDailyLogDict, outfile)
+
+                    # 볼린저 밴드를 상향 돌파후 다시 내려 않으면
+                    # elif BBdolpa == False:
+                    #     #시장가로 모두 매도!
+                    #     balances = myUpbit.SellCoinMarket(upbit,ticker,upbit.get_balance(ticker))
+
+                    #     # 수익율을 기록하고 저장합니다
+                    #     DolPaDailyLogDict[today][ticker]['수익율'] = revenue_rate
+
+                    #     with open(dailylog_type_file_path, 'w') as outfile:
+                    #         json.dump(DolPaDailyLogDict, outfile)
+
                     # 만일 실시간 수익율이 30% 이상 넘어갈 경우
-                    elif revenue_rate > 30:
+                    elif revenue_rate > 50:
                         #시장가로 모두 매도!
                         balances = myUpbit.SellCoinMarket(upbit,ticker,upbit.get_balance(ticker))
 
                         # 수익율을 기록하고 저장합니다
-                        DolPaDailyLogDict[today]['최종 수익율'] = DolPaDailyLogDict[today].get('최종 수익율', 0) + revenue_rate
+                        DolPaDailyLogDict[today][ticker]['수익율'] = revenue_rate
 
                         with open(dailylog_type_file_path, 'w') as outfile:
                             json.dump(DolPaDailyLogDict, outfile)
