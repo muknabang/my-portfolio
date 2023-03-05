@@ -20,7 +20,7 @@ import json
 1.1 - 변동성 돌파 + 노이즈 K + 180일봉 볼린저 밴드 상승돌파
       익절선을 넘을 경우 추가 매수(불타기)
       하루가 지나도 수익율이 0% 초과인 경우 유지
-1.2 - 변동성 돌파 + 노이즈 K + 상승장 and 180일봉 볼린저 밴드 상승돌파 + 슈퍼트렌드 매수타이밍
+1.2 - 변동성 돌파 + 노이즈 K + 상승장 and 180일봉 볼린저 밴드 상승돌파
       슈퍼트렌드 매도타이밍 캐치하면 바로 매도
       비트코인이 상승장일때만 거래시도
       
@@ -127,7 +127,8 @@ timestamp = time_now.timestamp()
 
 # 상승장에만 투자할 수 있도록 비트코인을 기준으로 마켓타이밍을 잡는다
 BTC_now = pyupbit.get_current_price("KRW-BTC")
-df_btc = pyupbit.get_ohlcv("KRW-BTC",interval="day")
+df_btc = pyupbit.get_ohlcv("KRW-BTC",interval="minute60")
+BTC_Supertrend = myUpbit.GetSupertrend(df_btc,30,5)
 
 btc_ma3 = float(myUpbit.GetMA(df_btc,3,-1))
 btc_ma5 = float(myUpbit.GetMA(df_btc,5,-1))
@@ -135,14 +136,13 @@ btc_ma10 = float(myUpbit.GetMA(df_btc,10,-1))
 btc_ma20 = float(myUpbit.GetMA(df_btc,20,-1))
 
 BTC_all_up = BTC_now > btc_ma3 and BTC_now > btc_ma5 and BTC_now > btc_ma10 and BTC_now > btc_ma20
+BTC_3hours = (df_btc[-1:]['open'] < df_btc[-1:]['close']).all() and (df_btc[-2:-1]['open'] < df_btc[-2:-1]['close']).all() and (df_btc[-3:-2]['open'] < df_btc[-3:-2]['close']).all()
 
 print('==================================================')
-print('현재 비트코인이 3일 이평선을 넘었나요? :',BTC_now > btc_ma3)
-print('현재 비트코인이 5일 이평선을 넘었나요? :',BTC_now > btc_ma5)
-print('현재 비트코인이 10일 이평선을 넘었나요? :',BTC_now > btc_ma10)
-print('현재 비트코인이 20일 이평선을 넘었나요? :',BTC_now > btc_ma20)
+print('지금 4개 이평선을 넘었나요? :', BTC_all_up)
+print('3시간 연속 상승세인가요? :', BTC_3hours)
 print('==================================================')
-print('현재 비트코인이 상승장인가요? :', BTC_all_up)
+
 
 #베스트봇 과정 진행하면서 탑코인 리스트 만들때 아래 같은 경로에 저장하게 만들었기에
 #일단 그대로 사용합니다. https://blog.naver.com/zacra/222670663136
@@ -153,32 +153,34 @@ TopCoinList = list()
 
 #파일을 읽어서 리스트를 만듭니다.
 
-if BTC_all_up == True:
+if BTC_all_up and BTC_3hours == True:
     try:
         with open(top_file_path, "r") as json_file:
             TopCoinList = json.load(json_file)
 
     except Exception as e:
-        TopCoinList = myUpbit.GetTopCoinList("day",30)
+        TopCoinList = myUpbit.GetTopCoinList("day",20)
         print("Exception by First")
 
-# 로그를 남기기 위한 사전 작업을 합시다.
+# 매일 로그를 남기기 위한 사전 작업을 합시다.
 
 today = datetime.date.today().strftime("%Y-%m-%d")
+if hour == 0 and min == 0:
+    try:
+        DolPaDailyLogDict[today] = ({'매수한 코인 개수': 0.0, '매수한 티커': [], '오늘의 수익률':0.0})
 
-try:        
-    with open(dailylog_type_file_path, 'w') as json_file:
-        json.dump(DolPaDailyLogDict, json_file, ensure_ascii=False, indent=4)
+        with open(dailylog_type_file_path, 'w') as json_file:
+            json.dump(DolPaDailyLogDict, json_file, ensure_ascii=False, indent=4)
 
-except Exception as e:
-    #처음에는 파일이 존재하지 않을테니깐 당연히 예외처리가 됩니다!
-    print("Exception by First")
+    except Exception as e:
+        #처음에는 파일이 존재하지 않을테니깐 당연히 예외처리가 됩니다!
+        print("Exception by First")
 
 #거래대금 탑 코인 리스트를 1위부터 내려가며 매수 대상을 찾는다.
 #전체 원화 마켓의 코인이 아니라 탑 순위 TopCoinList 안에 있는 코인만 체크해서 매수한다는 걸 알아두세요!
 
 # 비트코인이 상승장일때에만 거래를 한다.
-if BTC_all_up == True:
+if BTC_all_up and BTC_3hours == True:
 
     print('야호! 상승장이다! 매수 가즈아!')
 
@@ -252,23 +254,20 @@ if BTC_all_up == True:
                 # 볼린저 밴드(180일봉) 돌파를 이용해 큰추세로 상승세인지 알아본다
                 BBdolpa = myUpbit.BBUSignal(df,180,-1)
 
-                # 슈퍼트렌드를 통해 매수신호가 잡혔는지도 알아본다
-                Supertrend = myUpbit.GetSupertrend(df,30,5)
-
                 print('==================================================')    
                 print('현재가 :',now_price , "타겟가 :", target_price,'변동성 :', round(change_f,1), '5일이평선 :', ma5)
                 print('==================================================')
                 print('현재가가 타겟가보다 높은가? :',now_price > target_price)
                 # print('변동성이 10 미만인가? :',change_f <= 10)
-                print('5일 이평선 보다 현재가가 높은가? :',now_price > ma5)
                 print('==================================================')
+                print('5일 이평선 보다 현재가가 높은가? :',now_price > ma5)
                 print('볼린저 180일봉 상단선을 상향돌파했는가? :',BBdolpa == True)
-                print('수퍼트렌드 차트 상 매수신호가 잡혔는가? :',Supertrend == True)
+                print('')
 
                 #이를 돌파했다면 변동성 돌파 성공!! 코인을 매수하고 지정가 익절을 걸고 파일에 해당 코인을 저장한다!
                 #그 전에 상승장인지(각 화폐의 가격이 5일 이동평균보다 높은지) 여부 파악하여 낮으면 거래하지 않고 높으면 거래한다.
                 
-                if now_price > target_price and now_price > ma5 and len(DolPaCoinList) < MaxCoinCnt or len(DolPaCoinList) < MaxCoinCnt and BBdolpa == True and Supertrend == True:
+                if now_price > target_price and now_price > ma5 and len(DolPaCoinList) < MaxCoinCnt or now_price > target_price and len(DolPaCoinList) < MaxCoinCnt and BBdolpa == True: #and Supertrend == True:
                     # and now_price > ma5 and change_f <= 10 change_f < 5 and change_f <= 5 and myUpbit.GetHasCoinCnt(balances) < MaxCoinCnt: 
 
                     #보유하고 있지 않은 코인 (매수되지 않은 코인)일 경우만 매수한다!
@@ -292,24 +291,36 @@ if BTC_all_up == True:
                         #파일에 딕셔너리를 저장합니다
                         with open(revenue_type_file_path, 'w') as outfile:
                             json.dump(DolPaRevenueDict, outfile)
-                        ##############################################################
-                        # 매수된 코인 개수와 티커를 기록합시다.
-                        buy_count = myUpbit.GetHasCoinCnt(balances)
+                    
+                    ##############################################################
+                    # 매수된 코인 개수와 티커를 기록합시다.
+                    buy_count = myUpbit.GetHasCoinCnt(balances)
+                    today_profit = DolPaDailyLogDict.get(today, {}).get('오늘의 수익률', 0.0)
 
-                        DolPaDailyLogDict[today] = ({'매수한 코인 개수': buy_count, '매수한 티커': ticker})
+                    DolPaDailyLogDict[today] = ({'매수한 코인 개수': buy_count, '매수한 티커': ticker, '오늘의 수익률':today_profit})
 
-                        with open(dailylog_type_file_path, 'w') as json_file:
-                            json.dump(DolPaDailyLogDict, json_file)
-                        ##############################################################
+                    with open(dailylog_type_file_path, 'w', encoding='utf-8') as json_file:
+                        json.dump(DolPaDailyLogDict, json_file, ensure_ascii=False, indent=4)
+                    ##############################################################
 
         except Exception as e:
             print("---:", e)
 
 else:
-                print('######################')
-                print('오늘은 날이 좋지 않군...')
-                print('######################')
-                print('')
+    # 매수된 코인 개수와 티커를 기록합시다.
+    today_cnt = DolPaDailyLogDict.get(today, {}).get('매수한 코인 개수')
+    today_ticker = DolPaDailyLogDict.get(today, {}).get('매수한 티커')
+    today_profit = DolPaDailyLogDict.get(today, {}).get('오늘의 수익률')
+
+    DolPaDailyLogDict[today] = ({'매수한 코인 개수': today_cnt, '매수한 티커': today_ticker, '오늘의 수익률':today_profit})
+
+    with open(dailylog_type_file_path, 'w', encoding='utf-8') as json_file:
+        json.dump(DolPaDailyLogDict, json_file, ensure_ascii=False, indent=4)
+
+    print('######################')
+    print('오늘은 날이 좋지 않군...')
+    print('######################')
+    print('')
 
 
 
@@ -321,8 +332,8 @@ else:
 # 매수 후 체크하는 로직은 전체 코인 대상으로 체크하고
 # 매수 할때는 TopCoinList안의 코인만 체크해서 매수 합니다.
 
-
 Tickers = pyupbit.get_tickers("KRW")
+
 
 for ticker in Tickers:
     try: 
@@ -338,11 +349,8 @@ for ticker in Tickers:
                 # 수익율을 먼저 계산합니다.
                 revenue_rate = myUpbit.GetRevenueRate(balances,ticker)
 
-                 #보유중인 코인이고 익절선 이상 수익이 나고 있다면 유지!
-                if myUpbit.IsHasCoin(balances, ticker) == True and revenue_rate > stop_revenue:
-                    pass
-
-                else: #그게 아니라면
+                 # 만일 수익이 나고 있지 않다면
+                if revenue_rate <= stop_revenue:
 
                     #리스트에서 코인을 빼 버리고
                     DolPaCoinList.remove(ticker)
@@ -351,12 +359,13 @@ for ticker in Tickers:
                     balances = myUpbit.SellCoinMarket(upbit,ticker,upbit.get_balance(ticker))
 
                     # 매도 당시 수익율을 구해 로그에 저장합니다.
-                    revenue_rate = myUpbit.GetRevenueRate(balances,ticker)
+                    today_profit = DolPaDailyLogDict.get(today, {}).get('오늘의 수익률', 0.0)
+                    new_profit = today_profit + revenue_rate
 
-                    DolPaDailyLogDict[today][ticker]['수익율'] = revenue_rate
+                    DolPaDailyLogDict[today] = {'오늘의 수익률': new_profit}
 
-                    with open(dailylog_type_file_path, 'w') as outfile:
-                        json.dump(DolPaDailyLogDict, outfile)
+                    with open(dailylog_type_file_path, 'w', encoding='utf-8') as json_file:
+                        json.dump(DolPaDailyLogDict, json_file, ensure_ascii=False, indent=4)
 
                     #파일에 리스트를 저장합니다
                     with open(dolpha_type_file_path, 'w') as outfile:
@@ -385,11 +394,9 @@ for ticker in Tickers:
                     if DolPaRevenueDict[ticker][0] > stop_revenue:
                         
                         i += 1
+                        balances = myUpbit.BuyCoinMarket(upbit, ticker, f_cm)
                         stop_revenue = stop_revenue * i
 
-                        if DolPaRevenueDict[ticker][0] > stop_revenue == False:
-                            balances = myUpbit.BuyCoinMarket(upbit, ticker, f_cm)    
-                        
                     else:
                         i = 1
                     
@@ -408,10 +415,13 @@ for ticker in Tickers:
                         balances = myUpbit.SellCoinMarket(upbit,ticker,upbit.get_balance(ticker))
                         
                         # 수익율을 기록하고 저장합니다
-                        DolPaDailyLogDict[today][ticker]['수익율'] = revenue_rate
+                        today_profit = DolPaDailyLogDict.get(today, {}).get('오늘의 수익률', 0.0)
+                        new_profit = today_profit + revenue_rate
 
-                        with open(dailylog_type_file_path, 'w') as outfile:
-                            json.dump(DolPaDailyLogDict, outfile)
+                        DolPaDailyLogDict[today] = {'오늘의 수익률':new_profit}
+
+                        with open(dailylog_type_file_path, 'w', encoding='utf-8') as json_file:
+                            json.dump(DolPaDailyLogDict, json_file, ensure_ascii=False, indent=4)
                     
                     # 슈퍼트렌드에서 매도신호가 떴다면 모두 매도!
                     elif Supertrend == False :
@@ -420,10 +430,13 @@ for ticker in Tickers:
                         balances = myUpbit.SellCoinMarket(upbit,ticker,upbit.get_balance(ticker))
                         
                         # 수익율을 기록하고 저장합니다
-                        DolPaDailyLogDict[today][ticker]['수익율'] = revenue_rate
+                        today_profit = DolPaDailyLogDict.get(today, {}).get('오늘의 수익률', 0.0)
+                        new_profit = today_profit + revenue_rate
 
-                        with open(dailylog_type_file_path, 'w') as outfile:
-                            json.dump(DolPaDailyLogDict, outfile)
+                        DolPaDailyLogDict[today] = {'오늘의 수익률':new_profit}
+
+                        with open(dailylog_type_file_path, 'w', encoding='utf-8') as json_file:
+                            json.dump(DolPaDailyLogDict, json_file, ensure_ascii=False, indent=4)
 
                     # 볼린저 밴드를 상향 돌파후 다시 내려 않으면
                     # elif BBdolpa == False:
@@ -436,16 +449,19 @@ for ticker in Tickers:
                     #     with open(dailylog_type_file_path, 'w') as outfile:
                     #         json.dump(DolPaDailyLogDict, outfile)
 
-                    # 만일 실시간 수익율이 30% 이상 넘어갈 경우
+                    # 만일 실시간 수익율이 50% 이상 넘어갈 경우
                     elif revenue_rate > 50:
                         #시장가로 모두 매도!
                         balances = myUpbit.SellCoinMarket(upbit,ticker,upbit.get_balance(ticker))
 
                         # 수익율을 기록하고 저장합니다
-                        DolPaDailyLogDict[today][ticker]['수익율'] = revenue_rate
+                        today_profit = DolPaDailyLogDict.get(today, {}).get('오늘의 수익률', 0.0)
+                        new_profit = today_profit + revenue_rate
 
-                        with open(dailylog_type_file_path, 'w') as outfile:
-                            json.dump(DolPaDailyLogDict, outfile)
+                        DolPaDailyLogDict[today] = {'오늘의 수익률':new_profit}
+
+                        with open(dailylog_type_file_path, 'w', encoding='utf-8') as json_file:
+                            json.dump(DolPaDailyLogDict, json_file, ensure_ascii=False, indent=4)
                 ##############################################################
 
     except Exception as e:
